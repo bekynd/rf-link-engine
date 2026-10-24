@@ -30,6 +30,8 @@ export interface ClearanceAnalysis {
   extraHeightA_m: number;
   /** Same for B. */
   extraHeightB_m: number;
+  /** Same increase at both ends (lifts the line uniformly): never more than either single-end value. */
+  extraHeightBoth_m: number;
   points: ClearancePoint[];
 }
 
@@ -49,6 +51,7 @@ export function clearance(
   let controlling: ClearancePoint | null = null;
   let needA = 0;
   let needB = 0;
+  let needBoth = 0;
   for (let i = 1; i < n; i++) {
     const x = i * profile.spacing_m;
     const terrain = (e[i] as number) + earthBulge_m(x, d, a_e_m);
@@ -63,7 +66,8 @@ export function clearance(
       // Raising A by Δ lifts the line at x by Δ·(1 − x/d); raising B lifts it by Δ·x/d.
       needA = Math.max(needA, deficit / (1 - x / d));
       needB = Math.max(needB, deficit / (x / d));
+      needBoth = Math.max(needBoth, deficit);
     }
   }
-  return { controlling, obstructed: points.some((p) => p.ratio < 0), extraHeightA_m: needA, extraHeightB_m: needB, points };
+  return { controlling, obstructed: points.some((p) => p.ratio < 0), extraHeightA_m: needA, extraHeightB_m: needB, extraHeightBoth_m: needBoth, points };
 }

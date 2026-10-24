@@ -177,4 +177,14 @@ describe('A.6 Fresnel zone', () => {
     const almost = clearance(u, 2 + c.extraHeightA_m - 0.01, 10, 915, a_e);
     expect(almost.controlling!.ratio).toBeLessThan(0.6);
   });
+
+  it('the same raise at both ends is sufficient, minimal and never more than one end alone', () => {
+    const u = hill(10000, 60, 400, 100);
+    const a_e = effectiveEarthRadius_m(301);
+    const c = clearance(u, 2, 10, 915, a_e);
+    const h = c.extraHeightBoth_m;
+    expect(h).toBeLessThanOrEqual(Math.min(c.extraHeightA_m, c.extraHeightB_m));
+    expect(clearance(u, 2 + h, 10 + h, 915, a_e).controlling!.ratio).toBeGreaterThanOrEqual(0.6 - 1e-9);
+    expect(clearance(u, 2 + h - 0.01, 10 + h - 0.01, 915, a_e).controlling!.ratio).toBeLessThan(0.6);
+  });
 });
