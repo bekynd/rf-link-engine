@@ -47,6 +47,41 @@ export const CanonicalInputs = z.object({
 }).strict();
 export type CanonicalInputs = z.infer<typeof CanonicalInputs>;
 
+const ModelBuild = CanonicalInputs.shape.modelBuild;
+
+/**
+ * Coverage inputs (plan 6: "cache key = the canonical input definition of section 15"). One
+ * transmitter, a receiver height and clutter policy, the radial sampling, one variability column.
+ * `terrain.profilesSha256` is null for the request key (before terrain is fetched) and the hash of
+ * all radial profiles for the result id.
+ */
+export const CoverageCanonicalInputs = z.object({
+  schema: z.literal('rflp.canonical-coverage/1'),
+  center: LatLon,
+  radius_m: z.number().positive(),
+  /** First-pass bearings (request key) or all bearings after refinement (result id); refinement bound. */
+  sampling: z.object({ bearings_deg: z.array(z.number()).min(1), step_m: z.number().positive(), maxRadials: z.number().int().positive().optional() }).strict(),
+  frequency_mhz: z.number().positive(),
+  heights: z.object({ tx: TerminalHeights, rx_m: z.number() }).strict(),
+  polarization: z.number().int(),
+  climate: z.number().int(),
+  ground: z.object({ epsilon: z.number(), sigma: z.number() }).strict(),
+  N_0: z.number(),
+  environment: z.discriminatedUnion('option', [
+    z.object({ option: z.literal('A') }).strict(),
+    z.object({
+      option: z.literal('B'),
+      tx: ClutterParams,
+      rx: z.object({ source: z.enum(['land-cover', 'fixed']), types: z.array(ClutterParams).min(1), fallback: ClutterTypeName }).strict(),
+    }).strict(),
+  ]),
+  landCover: z.object({ dataset: z.string(), version: z.string(), resolution_m: z.number().positive(), windowCells: z.number().int().positive() }).strict().nullable(),
+  variability: z.object({ mode: z.number().int(), column: z.object({ time: z.number(), location: z.number(), situation: z.number() }).strict() }).strict(),
+  modelBuild: ModelBuild,
+  terrain: z.object({ dataset: z.string(), zoom: z.number().int(), profilesSha256: z.string().regex(/^[0-9a-f]{64}$/).nullable() }).strict(),
+}).strict();
+export type CoverageCanonicalInputs = z.infer<typeof CoverageCanonicalInputs>;
+
 export function canonicalJson(value: unknown): string {
   if (value === null) return 'null';
   if (typeof value === 'number') {
@@ -79,8 +114,14 @@ export function profileSha256(u: UniformProfile): Promise<string> {
   return sha256Hex(new Uint8Array(view.buffer));
 }
 
+/** SHA-256 of a sequence of uniform profiles (coverage radials), each hashed as in profileSha256. */
+export async function profilesSha256(us: readonly UniformProfile[]): Promise<string> {
+  const each = await Promise.all(us.map(profileSha256));
+  return sha256Hex(new TextEncoder().encode(each.join(',')));
+}
+
 /** The cache key, result id and change-detection hash: one function, one definition. */
-export async function inputsHash(inputs: CanonicalInputs): Promise<string> {
-  const parsed = CanonicalInputs.parse(inputs);
+export async function inputsHash(inputs: CanonicalInputs | CoverageCanonicalInputs): Promise<string> {
+  const parsed = inputs.schema === 'rflp.canonical-coverage/1' ? CoverageCanonicalInputs.parse(inputs) : CanonicalInputs.parse(inputs);
   return sha256Hex(new TextEncoder().encode(canonicalJson(parsed)));
 }

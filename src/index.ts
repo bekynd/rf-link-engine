@@ -4,6 +4,7 @@ export * from './antenna.ts';
 export * from './budget.ts';
 export * from './canonical.ts';
 export * from './clutter.ts';
+export * from './coverage.ts';
 export * from './environment.ts';
 export * from './fresnel.ts';
 export * from './labels.ts';

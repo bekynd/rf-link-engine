@@ -1,6 +1,8 @@
 // Worker pool with cancellation (plan 12.1: all in-flight work is cancellable; plan 6: cancellation
 // latency is benchmarked in phase 4). WASM calls are synchronous inside a worker, so cancelling a
 // running task terminates that worker and spawns a replacement; queued tasks are simply dropped.
+// `soft: true` (short tasks such as one coverage radial): a running task is left to finish and its
+// reply ignored, which avoids the worker restart and WASM start-up (GATE P2 cancellation latency).
 
 export interface PoolWorker {
   postMessage(message: unknown, transfer?: Transferable[]): void;
@@ -38,7 +40,7 @@ interface Slot {
 }
 
 export interface WorkerPool {
-  run<T>(type: string, payload: unknown, opts?: { signal?: AbortSignal; transfer?: Transferable[] }): Promise<T>;
+  run<T>(type: string, payload: unknown, opts?: { signal?: AbortSignal; transfer?: Transferable[]; soft?: boolean }): Promise<T>;
   readonly size: number;
   /** Tasks waiting for a free worker. */
   readonly queued: number;
@@ -105,7 +107,7 @@ export function createWorkerPool(spawn: () => PoolWorker, size: number): WorkerP
   return {
     get size() { return slots.length; },
     get queued() { return queue.length; },
-    run<T>(type: string, payload: unknown, opts: { signal?: AbortSignal; transfer?: Transferable[] } = {}) {
+    run<T>(type: string, payload: unknown, opts: { signal?: AbortSignal; transfer?: Transferable[]; soft?: boolean } = {}) {
       if (destroyed) return Promise.reject(new Error('pool destroyed'));
       if (opts.signal?.aborted) return Promise.reject(new TaskCancelledError());
       return new Promise<T>((resolve, reject) => {
@@ -115,7 +117,8 @@ export function createWorkerPool(spawn: () => PoolWorker, size: number): WorkerP
             const qi = queue.indexOf(p);
             if (qi >= 0) queue.splice(qi, 1);
             const slot = slots.find((s) => s.task === p);
-            if (slot) replace(slot); // hard cancel of a running synchronous task
+            if (slot && !opts.soft) replace(slot); // hard cancel of a running synchronous task
+            // soft: the slot frees itself when the (ignored) reply arrives
             settle(p);
             reject(new TaskCancelledError());
             pump();

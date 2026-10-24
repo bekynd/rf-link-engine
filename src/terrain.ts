@@ -113,6 +113,58 @@ export const sourceDataset = (s: string) => s.split('/')[0] ?? s;
 /** Heuristic for implausible adjacent-sample steps (plan 4.2 mitigation 4): flagged, never silently used. */
 export const STEP_CHECK = { minStep_m: 20, maxSlope: 1.0 } as const;
 
+// Tiles are keyed by number (x·2^z + y) internally: no string building per sample (coverage speed).
+const wrapX = (x: number, n: number) => ((x % n) + n) % n;
+const clampY = (y: number, n: number) => Math.min(n - 1, Math.max(0, y));
+const tileName = (z: number, k: number) => { const n = 2 ** z; return `${z}/${Math.floor(k / n)}/${k % n}`; };
+
+/** Tiles needed for the 2×2 bilinear neighbourhoods of pixel positions (numeric keys). */
+function tilesFor(xs: ArrayLike<number>, ys: ArrayLike<number>, z: number, needed = new Set<number>()): Set<number> {
+  const n = 2 ** z;
+  let last = '';
+  for (let i = 0; i < xs.length; i++) {
+    const fx = (xs[i] as number) - 0.5, fy = (ys[i] as number) - 0.5;
+    const tx0 = Math.floor(Math.floor(fx) / TILE_SIZE), tx1 = Math.floor((Math.floor(fx) + 1) / TILE_SIZE);
+    const ty0 = Math.floor(Math.floor(fy) / TILE_SIZE), ty1 = Math.floor((Math.floor(fy) + 1) / TILE_SIZE);
+    const sig = tx0 === tx1 && ty0 === ty1 ? `${tx0},${ty0}` : '';
+    if (sig && sig === last) continue;
+    last = sig;
+    for (const tx of [tx0, tx1]) for (const ty of [ty0, ty1]) needed.add(wrapX(tx, n) * n + clampY(ty, n));
+  }
+  return needed;
+}
+
+async function fetchTiles(src: TileSource, z: number, needed: Set<number>, signal?: AbortSignal): Promise<Map<number, TileData>> {
+  const n = 2 ** z;
+  const tiles = new Map<number, TileData>();
+  await Promise.all([...needed].map(async (k) => {
+    const t = await src.getTile(z, Math.floor(k / n), k % n, signal);
+    if (!t) throw new TerrainError('INSUFFICIENT_DATA', `terrain tile ${tileName(z, k)} unavailable: insufficient data`);
+    tiles.set(k, t);
+  }));
+  return tiles;
+}
+
+/** Bilinear elevation at a global pixel position (pixel centres at +0.5). */
+function bilinear(tiles: Map<number, TileData>, z: number) {
+  const n = 2 ** z;
+  let lastKey = -1;
+  let last: Float32Array | null = null;
+  const pixel = (px: number, py: number): number => {
+    const tx = Math.floor(px / TILE_SIZE), ty = clampY(Math.floor(py / TILE_SIZE), n);
+    const k = wrapX(tx, n) * n + ty;
+    if (k !== lastKey) { last = tiles.get(k)!.elevations; lastKey = k; }
+    const lx = px - tx * TILE_SIZE, ly = Math.min(TILE_SIZE - 1, Math.max(0, py - ty * TILE_SIZE));
+    return last![ly * TILE_SIZE + lx] as number;
+  };
+  return (x: number, y: number): number => {
+    const fx = x - 0.5, fy = y - 0.5;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const u = fx - x0, v = fy - y0;
+    return (1 - u) * (1 - v) * pixel(x0, y0) + u * (1 - v) * pixel(x0 + 1, y0) + (1 - u) * v * pixel(x0, y0 + 1) + u * v * pixel(x0 + 1, y0 + 1);
+  };
+}
+
 export async function sampleProfile(src: TileSource, a: LatLon, b: LatLon, opts: { zoom?: number; spacing_m?: number; signal?: AbortSignal } = {}): Promise<TerrainProfile> {
   const z = opts.zoom ?? TERRAIN_ZOOM.profile;
   const length = haversine_m(a, b);
@@ -120,40 +172,53 @@ export async function sampleProfile(src: TileSource, a: LatLon, b: LatLon, opts:
   const cell = groundResolution_m((a.lat + b.lat) / 2, z);
   const spacing = Math.max(opts.spacing_m ?? cell, length / MAX_PROFILE_INTERVALS);
   const intervals = Math.max(10, Math.ceil(length / spacing));
+  const xs = new Float64Array(intervals + 1), ys = new Float64Array(intervals + 1);
+  for (let i = 0; i <= intervals; i++) { const p = lonLatToPixel(greatCirclePoint(a, b, i / intervals), z); xs[i] = p.x; ys[i] = p.y; }
+  const tiles = await fetchTiles(src, z, tilesFor(xs, ys, z), opts.signal);
+  const at = bilinear(tiles, z);
+  return finishProfile(Array.from(xs, (x, i) => at(x, ys[i]!)), length, intervals, z, cell, tiles);
+}
 
-  const points = Array.from({ length: intervals + 1 }, (_, i) => lonLatToPixel(greatCirclePoint(a, b, i / intervals), z));
-  const nTiles = 2 ** z;
-  const key = (x: number, y: number) => `${z}/${((x % nTiles) + nTiles) % nTiles}/${y}`;
-  const needed = new Map<string, [number, number]>();
-  for (const p of points) {
-    const fx = p.x - 0.5, fy = p.y - 0.5;
-    for (const px of [Math.floor(fx), Math.floor(fx) + 1]) {
-      for (const py of [Math.floor(fy), Math.floor(fy) + 1]) {
-        const tx = Math.floor(px / TILE_SIZE), ty = Math.floor(py / TILE_SIZE);
-        needed.set(key(tx, ty), [((tx % nTiles) + nTiles) % nTiles, Math.min(nTiles - 1, Math.max(0, ty))]);
-      }
+/**
+ * Coverage radials (plan 6): the tiles of all radials fetched once, then each radial sampled
+ * synchronously. Positions are exact great-circle points every RADIAL_CHECKPOINT samples and linear
+ * in pixel space between them (test/terrain.test.ts compares with sampleProfile). Same spacing rule
+ * and flags as sampleProfile.
+ */
+export const RADIAL_CHECKPOINT = 32;
+export async function sampleRadials(
+  src: TileSource, center: LatLon, ends: readonly LatLon[], opts: { zoom: number; spacing_m: number; signal?: AbortSignal },
+): Promise<TerrainProfile[]> {
+  const z = opts.zoom;
+  const plans = ends.map((end) => {
+    const length = haversine_m(center, end);
+    if (!(length > 0)) throw new TerrainError('COINCIDENT_TERMINALS', 'the two terminals are at the same location');
+    const spacing = Math.max(opts.spacing_m, length / MAX_PROFILE_INTERVALS);
+    const intervals = Math.max(10, Math.ceil(length / spacing));
+    const xs = new Float64Array(intervals + 1), ys = new Float64Array(intervals + 1);
+    let prev = 0;
+    let pp = lonLatToPixel(center, z);
+    xs[0] = pp.x; ys[0] = pp.y;
+    for (let i = Math.min(intervals, RADIAL_CHECKPOINT); ; i = Math.min(intervals, i + RADIAL_CHECKPOINT)) {
+      const q = lonLatToPixel(greatCirclePoint(center, end, i / intervals), z);
+      for (let k = prev + 1; k <= i; k++) { const t = (k - prev) / (i - prev); xs[k] = pp.x + t * (q.x - pp.x); ys[k] = pp.y + t * (q.y - pp.y); }
+      prev = i; pp = q;
+      if (i === intervals) break;
     }
-  }
-  const tiles = new Map<string, TileData>();
-  await Promise.all([...needed].map(async ([k, [tx, ty]]) => {
-    const t = await src.getTile(z, tx, ty, opts.signal);
-    if (!t) throw new TerrainError('INSUFFICIENT_DATA', `terrain tile ${k} unavailable: insufficient data`);
-    tiles.set(k, t);
-  }));
-
-  const pixel = (px: number, py: number): number => {
-    const tx = Math.floor(px / TILE_SIZE), ty = Math.min(nTiles - 1, Math.max(0, Math.floor(py / TILE_SIZE)));
-    const t = tiles.get(key(tx, ty))!;
-    const lx = px - tx * TILE_SIZE, ly = Math.min(TILE_SIZE - 1, Math.max(0, py - ty * TILE_SIZE));
-    return t.elevations[ly * TILE_SIZE + lx] as number;
-  };
-  const elevations = points.map((p) => {
-    const fx = p.x - 0.5, fy = p.y - 0.5;
-    const x0 = Math.floor(fx), y0 = Math.floor(fy);
-    const u = fx - x0, v = fy - y0;
-    return (1 - u) * (1 - v) * pixel(x0, y0) + u * (1 - v) * pixel(x0 + 1, y0) + (1 - u) * v * pixel(x0, y0 + 1) + u * v * pixel(x0 + 1, y0 + 1);
+    return { length, intervals, xs, ys, cell: groundResolution_m((center.lat + end.lat) / 2, z), needed: tilesFor(xs, ys, z) };
   });
+  const needed = new Set<number>();
+  for (const p of plans) for (const k of p.needed) needed.add(k);
+  const tiles = await fetchTiles(src, z, needed, opts.signal);
+  const at = bilinear(tiles, z);
+  return plans.map((p) => {
+    const used = new Map<number, TileData>();
+    for (const k of p.needed) used.set(k, tiles.get(k)!);
+    return finishProfile(Array.from(p.xs, (x, i) => at(x, p.ys[i]!)), p.length, p.intervals, z, p.cell, used);
+  });
+}
 
+function finishProfile(elevations: number[], length: number, intervals: number, z: number, cell: number, tiles: Map<number, TileData>): TerrainProfile {
   // A tile's header may list several comma-separated sources ("ned13/a.tif, srtm/N41W074.tif").
   // A boundary that matters is between DATASETS (prefix before "/": ned13, ned, srtm, gmted, …),
   // which can differ in vertical datum; 1° tiles of one dataset share it.
@@ -173,6 +238,6 @@ export async function sampleProfile(src: TileSource, a: LatLon, b: LatLon, opts:
   return {
     profile: { distances_m: Array.from({ length: intervals + 1 }, (_, i) => (i === intervals ? length : i * step)), elevations_m: elevations },
     dataset: TERRAIN_DATASET, zoom: z, cellSize_m: cell, spacing_m: step, length_m: length,
-    tiles: [...tiles.keys()].sort(), sources: known, datasets, flags,
+    tiles: [...tiles.keys()].map((k) => tileName(z, k)).sort(), sources: known, datasets, flags,
   };
 }

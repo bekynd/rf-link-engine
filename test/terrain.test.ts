@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   TILE_SIZE, TerrainError, decodeTerrarium, decodeTerrariumImage, greatCirclePoint, groundResolution_m,
-  haversine_m, lonLatToPixel, sampleProfile, type TileData, type TileSource,
+  haversine_m, lonLatToPixel, sampleProfile, sampleRadials, type TileData, type TileSource,
 } from '../src/terrain.ts';
+import { destinationPoint } from '../src/coverage.ts';
 
 /** Synthetic world: elevation as a function of global pixel coordinates at zoom z. */
 function world(fn: (gx: number, gy: number) => number, source?: (x: number, y: number) => string | undefined): TileSource & { calls: string[] } {
@@ -88,5 +89,21 @@ describe('terrain (plan 4.2)', () => {
   it('implausible adjacent steps are flagged', async () => {
     const t = await sampleProfile(world((gx) => (gx > 3798.5 * 256 ? 500 : 0)), { lat: 39.1, lon: -96.6 }, { lat: 39.1, lon: -96.5 });
     expect(t.flags.some((f) => f.code === 'IMPLAUSIBLE_STEP')).toBe(true);
+  });
+
+  it('radial sampler (coverage) matches the exact sampler: same intervals, elevations within 1 cm, same flags', async () => {
+    const rough = world((gx, gy) => 200 + 80 * Math.sin(gx / 37) * Math.cos(gy / 23) + 30 * Math.sin((gx + gy) / 9), (x) => (x % 2 ? 'ned13/a.tif' : 'srtm/b.hgt'));
+    const center = { lat: 44.35, lon: -68.22 };
+    const ends = [0, 37, 90, 181, 300].map((b) => destinationPoint(center, b, 30000));
+    const fast = await sampleRadials(rough, center, ends, { zoom: 12, spacing_m: 22 });
+    for (let i = 0; i < ends.length; i++) {
+      const exact = await sampleProfile(rough, center, ends[i]!, { zoom: 12, spacing_m: 22 });
+      expect(fast[i]!.profile.elevations_m.length).toBe(exact.profile.elevations_m.length);
+      expect(fast[i]!.spacing_m).toBe(exact.spacing_m);
+      const d = fast[i]!.profile.elevations_m.map((e, k) => Math.abs(e - exact.profile.elevations_m[k]!));
+      expect(Math.max(...d)).toBeLessThan(0.01);
+      expect(fast[i]!.flags.map((f) => f.code)).toEqual(exact.flags.map((f) => f.code));
+      expect(fast[i]!.datasets).toEqual(exact.datasets);
+    }
   });
 });

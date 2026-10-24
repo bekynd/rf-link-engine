@@ -36,7 +36,10 @@ node scripts/t4-report.ts       # P.2108 combination reference report
 | Antenna angles | Direct terminal-to-terminal angle when the direct ray is geometrically clear; raw terrain horizon angle when obstructed. ITM's "line-of-sight" mode is not used for this: it means d < d_sML from effective heights and can hold on ridge-blocked paths |
 | Link budget | Explicit power terms, ERP or power + gains (never both), feedline, components, polarization, body/enclosure losses skipped when the antenna gain includes them |
 | Terrain | Terrarium tiles at z14, great-circle sampling with bilinear interpolation, dataset-boundary and implausible-step flags; missing data is an error, never a guess |
-| Inputs hash | One canonical inputs definition (sorted keys, ECMAScript number formatting, SHA-256) for cache keys and result ids |
+| Coverage | One profile per radial; ITM on each prefix of it, so every point equals the point-to-point result on the truncated profile; receiver clutter per point; pointing angles per point when a pattern needs them; resolution labels (2πR/N, step, terrain cell); a fast radial sampler (tiles fetched once, exact great-circle positions every 32 samples) |
+| Robust point sets | Worst margin within a location-uncertainty radius (center plus rings); an unsupported sample makes the point unknown |
+| Worker pool | Hard cancel (terminate and respawn) for long tasks, soft cancel (drop queued, let a short running task finish) for coverage radials |
+| Inputs hash | One canonical inputs definition (sorted keys, ECMAScript number formatting, SHA-256) for cache keys and result ids, for links and for coverage maps |
 
 Results are model predictions: unvalidated against field measurements unless a validation status
 says otherwise.

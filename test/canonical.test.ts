@@ -80,4 +80,25 @@ describe('T1 canonical inputs', () => {
     roots.forEach(walk);
     expect(offenders).toEqual([]);
   });
+
+  it('coverage inputs hash through the same function; terrain hash and sampling change the id', async () => {
+    const { MODEL_BUILD } = await import('../src/model-build.ts');
+    const base = {
+      schema: 'rflp.canonical-coverage/1' as const,
+      center: { lat: 44.35, lon: -68.22 }, radius_m: 20000,
+      sampling: { bearings_deg: [0, 90, 180, 270], step_m: 100 },
+      frequency_mhz: 915, heights: { tx: { actual_m: 4, itm_m: 10 }, rx_m: 1.5 },
+      polarization: 1, climate: 5, ground: { epsilon: 15, sigma: 0.005 }, N_0: 301,
+      environment: { option: 'B' as const, tx: { type: 'suburban' as const, R_m: 10, streetWidth_m: 27 }, rx: { source: 'land-cover' as const, types: [{ type: 'suburban' as const, R_m: 10, streetWidth_m: 27 }], fallback: 'suburban' as const } },
+      landCover: { dataset: 'ESA WorldCover', version: '10m 2021 v200', resolution_m: 20, windowCells: 5 },
+      variability: { mode: 13, column: { time: 50, location: 50, situation: 50 } },
+      modelBuild: { engine: MODEL_BUILD.engine, itmCommit: MODEL_BUILD.itm.commit, p2108Commit: MODEL_BUILD.p2108.commit, recommendations: { ...MODEL_BUILD.recommendations }, emscripten: MODEL_BUILD.emscripten },
+      terrain: { dataset: 'aws-terrain-tiles-terrarium', zoom: 12, profilesSha256: null },
+    };
+    const h0 = await inputsHash(base);
+    expect(h0).toMatch(/^[0-9a-f]{64}$/);
+    expect(await inputsHash({ ...base, sampling: { bearings_deg: [0, 90, 180, 270, 45], step_m: 100 } })).not.toBe(h0);
+    expect(await inputsHash({ ...base, terrain: { ...base.terrain, profilesSha256: 'a'.repeat(64) } })).not.toBe(h0);
+    await expect(inputsHash({ ...base, extra: 1 } as unknown as typeof base)).rejects.toThrow();
+  });
 });

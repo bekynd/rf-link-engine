@@ -67,6 +67,22 @@ describe('worker pool', () => {
     pool.destroy();
   });
 
+  it('soft cancel rejects at once, keeps the worker (no restart), and drops queued tasks', async () => {
+    const { spawn, stats } = fakeSpawner(30);
+    const pool = createWorkerPool(spawn, 1);
+    const ctl = new AbortController();
+    const running = pool.run('echo', 'x', { signal: ctl.signal, soft: true });
+    const queued = pool.run('echo', 'q', { signal: ctl.signal, soft: true });
+    ctl.abort();
+    await expect(running).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    expect(pool.queued).toBe(0);
+    expect(stats.terminated).toBe(0);
+    expect(stats.spawned).toBe(1);
+    expect(await pool.run('echo', 'y')).toBe('y'); // runs after the abandoned task's reply frees the slot
+    pool.destroy();
+  });
+
   it('worker handler computes path loss with the engine', async () => {
     const { spawn } = fakeSpawner(0, true);
     const pool = createWorkerPool(spawn, 1);
