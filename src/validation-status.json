@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "updated": "2026-10-24",
+  "note": "Plan 16.4 / T4. Changed only by the 16.2/16.3 evidence process, never by code. A cell is (band, environment).",
+  "default": { "model": "unvalidated", "combinedModel": "experimental" },
+  "cells": {}
+}
