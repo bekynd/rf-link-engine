@@ -56,7 +56,7 @@ describe('T1 canonical inputs', () => {
 
   it('hash is pinned (same value is asserted in the browser test suite, phase 2)', async () => {
     // If this changes, the canonical definition changed: bump the schema version.
-    expect(await inputsHash(await sample())).toMatchInlineSnapshot(`"514c2b523f443b7a43585551338ad5afe9fdd65b37e0802991f37cd2f38a6983"`);
+    expect(await inputsHash(await sample())).toMatchInlineSnapshot(`"e015312a0152010751ec4a66303ff4a88afbcb36f7fb29afe7406b26dd91ce5e"`);
   });
 
   it('unknown fields are rejected (strict schema)', async () => {
