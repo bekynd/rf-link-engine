@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { canonicalJson, inputsHash, profileSha256, type CanonicalInputs } from '../src/canonical.ts';
+import { canonicalJson, inputsHash, profileSha256, sha256, type CanonicalInputs } from '../src/canonical.ts';
 import { MODEL_BUILD } from '../src/model-build.ts';
 import { flat } from './helpers.ts';
 
@@ -100,5 +100,17 @@ describe('T1 canonical inputs', () => {
     expect(await inputsHash({ ...base, sampling: { bearings_deg: [0, 90, 180, 270, 45], step_m: 100 } })).not.toBe(h0);
     expect(await inputsHash({ ...base, terrain: { ...base.terrain, profilesSha256: 'a'.repeat(64) } })).not.toBe(h0);
     await expect(inputsHash({ ...base, extra: 1 } as unknown as typeof base)).rejects.toThrow();
+  });
+
+  it('the fallback SHA-256 (no Web Crypto on plain http) matches FIPS vectors and Web Crypto', async () => {
+    const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+    const enc = (t: string) => new TextEncoder().encode(t);
+    expect(hex(sha256(enc('')))).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    expect(hex(sha256(enc('abc')))).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+    expect(hex(sha256(enc('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq')))).toBe('248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1');
+    for (const n of [55, 56, 63, 64, 65, 1000, 100_003]) {
+      const bytes = Uint8Array.from({ length: n }, (_, i) => (i * 31 + 7) & 255);
+      expect(hex(sha256(bytes))).toBe(hex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))));
+    }
   });
 });
