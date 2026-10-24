@@ -9,6 +9,7 @@ export * from './environment.ts';
 export * from './fresnel.ts';
 export * from './labels.ts';
 export * from './model-build.ts';
+export * from './noise.ts';
 export * from './ntia.ts';
 export * from './path.ts';
 export * from './profile.ts';
