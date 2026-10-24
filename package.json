@@ -1,0 +1,24 @@
+{
+  "name": "@rflp/engine",
+  "version": "0.1.0",
+  "description": "RF Link Planner propagation engine: NTIA ITM + ITU-R P.2108 (NTIA) in WebAssembly with a validating wrapper, link budget and Appendix A methods.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build:wasm": "node scripts/build.mjs",
+    "golden": "node scripts/native-golden.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}

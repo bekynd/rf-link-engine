@@ -1,0 +1,19 @@
+RF Link Planner propagation engine
+Licensed under the Apache License, Version 2.0.
+
+This product includes software developed by employees of the National Telecommunications and
+Information Administration (NTIA), Institute for Telecommunication Sciences (ITS):
+
+  * Irregular Terrain Model (ITM), https://github.com/NTIA/itm
+    commit 183ad95bd813a8be11009df396e1c631356864b2. MODIFIED: portable include paths and export
+    macro (2026-10-24); see third_party/ntia-itm/MODIFIED.md.
+  * Recommendation ITU-R P.2108 implementation, https://github.com/NTIA/p2108
+    release v1.1, commit eadb58f7daa5f077b7bd67fc30daf49f0ae037e6 (implements ITU-R P.2108-1).
+    Not modified; compiled with LIBRARY_NAME/LIBRARY_VERSION defined as NTIA's CMake does.
+  * P.2108 test data, https://github.com/NTIA/p2108-test-data, commit
+    e46db673fe14732cb3b25d0b37b35316de7b9d73 (used for tests only).
+
+Pursuant to Title 15 United States Code Section 105, works of NTIA employees are not subject to
+copyright protection within the United States. NTIA's software disclaimer / release is reproduced
+in third_party/ntia-itm/LICENSE.md and third_party/ntia-p2108/LICENSE.md. NTIA makes no warranty
+of any kind for that software.
