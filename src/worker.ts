@@ -1,5 +1,6 @@
 // Worker entry: `new Worker(new URL('@rflp/engine/src/worker.ts', import.meta.url), { type: 'module' })`.
 // Handles task messages from worker-pool.ts with the engine loaded once per worker.
+import './zod-jitless.ts'; // first: before any module that defines a schema
 import { radialPrefixLosses, type RadialRequest } from './coverage.ts';
 import { predictPathLoss, type PathRequest } from './path.ts';
 import { loadEngineWasm } from './wasm.ts';
